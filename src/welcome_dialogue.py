@@ -38,7 +38,7 @@ class SelectDBDialog(QDialog):
         directory = QFileDialog.getExistingDirectory(self,
                 "Select Directory", "", options=options)
         if directory:
-            QMessageBox.information(self, "test", str(directory))
+            # QMessageBox.information(self, "test", str(directory))
             self.select_file = Path(directory) / "data.sqlite3"
             self.accept()
 
@@ -49,7 +49,7 @@ class SelectDBDialog(QDialog):
                 "DB Files (*.sqlite3);;All Files (*)", options=options)
         print("======  ", _)
         if file:
-            QMessageBox.information(self, "test", str(file))
+            # QMessageBox.information(self, "test", str(file))
             self.select_file = Path(file)
             self.accept()
 
@@ -57,11 +57,9 @@ class SelectDBDialog(QDialog):
     def welcome_dialog():
         """show welcome dialog"""
         dialog = SelectDBDialog()
-        r = dialog.exec()
-        # r = dialog.show()
-        # print("===== ", r)
+        _ = dialog.exec()
         data = dialog.select_file
-        
+
         return data
 
 

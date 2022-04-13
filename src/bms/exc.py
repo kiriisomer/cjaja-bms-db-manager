@@ -1,0 +1,2 @@
+class ParseBmsError(Exception): 
+    pass

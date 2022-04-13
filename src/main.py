@@ -6,7 +6,16 @@ from welcome_dialogue import SelectDBDialog
 from main_window import MainWindow
 
 
+def check_python_ver():
+    import platform
+    major, minor, _ = [int(x) for x in platform.python_version_tuple()]
+    if any((major!=3, minor<8)):
+        print("Need Python Version 3.8 or above", file=sys.stderr)
+        sys.exit(1)
+    
+
 def main():
+    check_python_ver()
     # can open file in command line.
     file_path = None
     app = QApplication(sys.argv)

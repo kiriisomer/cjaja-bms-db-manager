@@ -8,10 +8,15 @@ from PyQt5.QtGui import (
 )
 from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
-    QSpacerItem, QSizePolicy, 
+    QSpacerItem, QSizePolicy,
     QAction, QTreeWidget, QTreeWidgetItem, QSplitter, QTableView, QHeaderView,
     QDialog, QDockWidget, QPushButton, QLabel, QLineEdit,
     QFileDialog, QListWidget, QMainWindow, QMessageBox, QTextEdit
+)
+
+from db.service_code import (
+    search_bms_list, search_folder_list, search_song_list,
+    prepare_sqlite3_db,
 )
 
 
@@ -22,7 +27,7 @@ class MainWindow(QMainWindow):
         self.window_title = window_title
         self.setWindowTitle(self.window_title)
         self.resize(854, 480)
-        
+
         self._init_menus()
         self._init_status_bar()
         self._init_widgets()
@@ -31,7 +36,6 @@ class MainWindow(QMainWindow):
         """init window menus"""
         self._menu_action_quit = QAction("&Quit", self, shortcut="Ctrl+Q",
                 statusTip="Quit the application", triggered=self.close)
-
         self.fileMenu = self.menuBar().addMenu("&File")
         self.fileMenu.addAction(self._menu_action_quit)
 
@@ -87,6 +91,11 @@ class MainWindow(QMainWindow):
 
     def open_file(self, file_path:Path):
         """open database file"""
+        try:
+            prepare_sqlite3_db(Path(file_path))
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Open file {file_path} failed: {e}")
+            self.close()
 
     def onTreeClicked(self, qmodelindex: QModelIndex):
         item = self.tree.currentItem()
@@ -99,7 +108,8 @@ class MainWindow(QMainWindow):
             self.table_model.query_params["page"] = 1
 
     def onNextBtnClicked(self):
-        pass
+        if self.table_model.query_params["page"] < self.table_model.query_params["total_page"]:
+            self.table_model.query_params["page"] += 1
 
 
 class FilterDialog(QDialog):
@@ -108,7 +118,7 @@ class FilterDialog(QDialog):
 
         mainLayout = QGridLayout()
 
-        label_01 = QLabel("name:")
+        label_01 = QLabel("title:")
         self.edit_01 = QLineEdit()
         label_01.setBuddy(self.edit_01)
         label_02 = QLabel("genre:")
@@ -124,7 +134,7 @@ class FilterDialog(QDialog):
         mainLayout.addWidget(self.edit_02, 1, 1, 1, 3)
         mainLayout.addWidget(label_03, 2, 0, 1, 1)
         mainLayout.addWidget(self.edit_03, 2, 1, 1, 3)
-        
+
         # mainLayout.setRowStretch(0, 1)
         # mainLayout.setRowStretch(1, 1)
         # mainLayout.setRowStretch(2, 1)
@@ -133,12 +143,6 @@ class FilterDialog(QDialog):
         self.setLayout(mainLayout)
 
         self.setWindowTitle("Styles")
-
-
-headers = ["Scientist name", "Birthdate", "Contribution"]
-rows = [("Newton", "1643-01-04", "Classical mechanics"),
-        ("Einstein", "1879-03-14", "Relativity"),
-        ("Darwin", "1809-02-12", "Evolution")]
 
 
 class TableModel(QAbstractTableModel):
@@ -151,7 +155,7 @@ class TableModel(QAbstractTableModel):
             "table_name": "",
             "page": 1,
             "pagesize": 100,
-            "name": None,
+            "total_page": 0,
         }
 
     def rowCount(self, parent):
@@ -176,7 +180,7 @@ class TableModel(QAbstractTableModel):
         print("fetch_data: ", table_name)
         self.beginResetModel()
         if table_name == "song":
-            self._query_bms_file()
+            self._query_bms()
         elif table_name == "bms":
             self._query_song()
         elif table_name == "folder":
@@ -186,20 +190,43 @@ class TableModel(QAbstractTableModel):
             self.datas = []
         self.endResetModel()
 
-    def _query_bms_file(self):
+    def _format_datas(self, data:list):
+        """format dict type data to list type data"""
+        result = []
+        for item in data:
+            result.append([item[key] for key in self.headers])
+        return result
+
+    def _query_bms(self):
         """"""
-        self.headers = ["name", "song_info_1", "song_info_2", "song_info_3"]
-        self.datas = [("001", "001_1", "001_2", "001_3")]
+        self.headers = [
+            "id", "file_path", "PLAYER", "TITLE", "ARTIST", "GENRE", "PLAYLEVEL",
+            "RANK", "TOTAL", "DIFFICULTY", "BPM", "PREVIEW", "MIN_BPM", "MAX_BPM",
+        ]
+        result = search_bms_list(
+            page=self.query_params["page"], page_size=self.query_params["pagesize"])
+
+        self.query_params["total_page"] = result["total"] // self.query_params["pagesize"] + 1
+        self.datas = self._format_datas(result["data"])
 
     def _query_song(self, filter_name=None, page=1, page_size=100):
         """"""
-        self.headers = ["name", "bms_info_1", "bms_info_2"]
-        self.datas = rows
+        self.headers = ["id", "name", "file_path"]
+        result = search_song_list(
+            page=self.query_params["page"], page_size=self.query_params["pagesize"])
+
+        self.query_params["total_page"] = result["total"] // self.query_params["pagesize"] + 1
+        self.datas = self._format_datas(result["data"])
+
 
     def _query_folder(self, filter_name=None, page=1, page_size=100):
         """"""
-        self.headers = ["name", "folder_info_1", "folder_info_2"]
-        self.datas = []
+        self.headers = ["id", "name", "desc", "info"]
+        result = search_folder_list(
+            page=self.query_params["page"], page_size=self.query_params["pagesize"])
+
+        self.query_params["total_page"] = result["total"] // self.query_params["pagesize"] + 1
+        self.datas = self._format_datas(result["data"])
 
 
 class NameTree(QTreeWidget):
@@ -216,7 +243,7 @@ class NameTree(QTreeWidget):
         self.createItem("bms", None, 0)
         self.createItem("song", None, 1)
         self.createItem("folder", None, 2)
-    
+
     def createItem(self, text, parent, index):
         after = None
         if index != 0:
@@ -229,7 +256,7 @@ class NameTree(QTreeWidget):
 
         item.setText(0, text)
         return item
-    
+
     def childAt(self, parent, index):
         if parent is not None:
             return parent.child(index)
