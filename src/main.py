@@ -7,12 +7,13 @@ from main_window import MainWindow
 
 
 def check_python_ver():
+    """I use python3.8, so I need to check it."""
     import platform
     major, minor, _ = [int(x) for x in platform.python_version_tuple()]
     if any((major!=3, minor<8)):
         print("Need Python Version 3.8 or above", file=sys.stderr)
         sys.exit(1)
-    
+
 
 def main():
     check_python_ver()

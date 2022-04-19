@@ -1,6 +1,7 @@
 from pathlib import Path
 from PyQt5.QtCore import (
-    QDate, QFile, Qt, QTextStream, QAbstractTableModel, QVariant, QModelIndex
+    QDate, QFile, Qt, QTextStream, QAbstractTableModel, QVariant, QModelIndex,
+    QThread, pyqtSignal, pyqtSlot,
 )
 from PyQt5.QtGui import (
     QFont, QIcon, QKeySequence, QTextCharFormat,
@@ -11,13 +12,16 @@ from PyQt5.QtWidgets import (
     QSpacerItem, QSizePolicy,
     QAction, QTreeWidget, QTreeWidgetItem, QSplitter, QTableView, QHeaderView,
     QDialog, QDockWidget, QPushButton, QLabel, QLineEdit,
-    QFileDialog, QListWidget, QMainWindow, QMessageBox, QTextEdit
+    QFileDialog, QListWidget, QMainWindow, QMessageBox, QTextEdit,
+    QProgressBar,
 )
-
 from db.service_code import (
     search_bms_list, search_folder_list, search_song_list,
     prepare_sqlite3_db,
+    add_bms, add_folder, add_song,
+    add_song_bms_relation,
 )
+from bms.parser import scan_bms_file_iter
 
 
 class MainWindow(QMainWindow):
@@ -36,8 +40,11 @@ class MainWindow(QMainWindow):
         """init window menus"""
         self._menu_action_quit = QAction("&Quit", self, shortcut="Ctrl+Q",
                 statusTip="Quit the application", triggered=self.close)
+        self._menu_action_scan_dir = QAction("&Scan dir", self, shortcut="Ctrl+D",
+                statusTip="Quit the application", triggered=self._action_scan_dir)
         self.fileMenu = self.menuBar().addMenu("&File")
         self.fileMenu.addAction(self._menu_action_quit)
+        self.fileMenu.addAction(self._menu_action_scan_dir)
 
         self._menu_action_about = QAction("&About", self,
                 statusTip="Show the application's About box",
@@ -88,6 +95,16 @@ class MainWindow(QMainWindow):
         QMessageBox.about(self, f"About {self.window_title}",
             "Manage <b>Cjaja</b> bms database."
         )
+
+    def _action_scan_dir(self):
+        """scan bms files in directory recursively"""
+        options = QFileDialog.DontResolveSymlinks | QFileDialog.ShowDirsOnly
+        directory = QFileDialog.getExistingDirectory(self,
+                "Select Directory", "", options=options)
+        if directory:
+            print(f"{directory=}")
+            """popup a dialog to show progress"""
+            _ = ScanDirProgressDialog.scan_process_dialog(self, Path(directory))
 
     def open_file(self, file_path:Path):
         """open database file"""
@@ -145,6 +162,95 @@ class FilterDialog(QDialog):
         self.setWindowTitle("Styles")
 
 
+class ScanDirProgressDialog(QDialog):
+    def __init__(self, parent=None, scan_dir:Path=None):
+        super().__init__(parent)
+
+        self.info_label = QLabel("")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(0)
+        self.cancel_btn = QPushButton("Interrupt")
+        self.cancel_btn.clicked.connect(self.on_cancel)
+
+        layout = QGridLayout()
+        layout.setColumnStretch(1, 1)
+
+        layout.addWidget(self.info_label, 0, 0)
+        layout.addWidget(self.progress_bar, 1, 0)
+        layout.addWidget(self.cancel_btn, 2, 0)
+
+        self.setLayout(layout)
+        self.setWindowTitle("Scanning...")
+
+        # init work thread
+        self.work_thread = ScanDirThread(self, scan_dir)
+        self.work_thread.register_signal(self.on_signal)
+        self.work_thread.start()
+
+    def on_signal(self, status:int, count:int, bms_file:Path):
+        if status == 0:
+            self.info_label.setText(f"{count} -- {bms_file}")
+        else:
+            # close this dialog
+            self.close()
+
+    def on_cancel(self):
+        self.close()
+
+    def closeEvent(self, event) -> None:
+        if self.work_thread.isRunning():
+            self.work_thread.interrupt()
+        event.accept()
+
+    @staticmethod
+    def scan_process_dialog(parent, dir_:Path):
+        """scan directory recursively"""
+        if not dir_.exists():
+            raise FileNotFoundError(f"{dir_} not found")
+        if not dir_.is_dir():
+            raise NotADirectoryError(f"{dir_} is not a directory")
+
+        progress_dialog = ScanDirProgressDialog(parent, dir_)
+        progress_dialog.exec_()
+
+        return progress_dialog.result
+
+
+class ScanDirThread(QThread):
+    _signal = pyqtSignal(int, int, str)
+
+    def __init__(self, parent, scan_dir:Path):
+        super().__init__(parent)
+        self.scan_dir = Path(scan_dir)
+        self.interrupt = False
+
+    def register_signal(self, slot):
+        self._signal.connect(slot)
+
+    def interrupt(self):
+        self.interrupt = True
+
+    def run(self):
+        try:
+            counter = 0
+            for info in scan_bms_file_iter(self.scan_dir):
+                counter += 1
+                self._signal.emit(0, counter, str(info["file_path"]))
+                bms_obj=add_bms(info["file_path"], info, on_error_raise_exc=False)
+                song_obj=add_song(info["TITLE"], info["file_path"].parent, on_error_raise_exc=False)
+                add_song_bms_relation(song_obj, bms_obj)
+                if self.interrupt:
+                    break
+
+            self._signal.emit(1, 0, "")
+            self.exit(0)
+        except Exception as e:
+            print(e)
+            self._signal.emit(2, 0, "")
+            self.exit(1)
+
+
 class TableModel(QAbstractTableModel):
     """right table model"""
     def __init__(self):
@@ -179,9 +285,9 @@ class TableModel(QAbstractTableModel):
         """"""
         print("fetch_data: ", table_name)
         self.beginResetModel()
-        if table_name == "song":
+        if table_name == "bms":
             self._query_bms()
-        elif table_name == "bms":
+        elif table_name == "song":
             self._query_song()
         elif table_name == "folder":
             self._query_folder()
@@ -211,13 +317,12 @@ class TableModel(QAbstractTableModel):
 
     def _query_song(self, filter_name=None, page=1, page_size=100):
         """"""
-        self.headers = ["id", "name", "file_path"]
+        self.headers = ["id", "name", "dir_path"]
         result = search_song_list(
             page=self.query_params["page"], page_size=self.query_params["pagesize"])
 
         self.query_params["total_page"] = result["total"] // self.query_params["pagesize"] + 1
         self.datas = self._format_datas(result["data"])
-
 
     def _query_folder(self, filter_name=None, page=1, page_size=100):
         """"""

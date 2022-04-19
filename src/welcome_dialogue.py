@@ -34,7 +34,7 @@ class SelectDBDialog(QDialog):
 
     def new(self):
         # open directory for storage
-        options = options = QFileDialog.DontResolveSymlinks | QFileDialog.ShowDirsOnly
+        options = QFileDialog.DontResolveSymlinks | QFileDialog.ShowDirsOnly
         directory = QFileDialog.getExistingDirectory(self,
                 "Select Directory", "", options=options)
         if directory:

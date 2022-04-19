@@ -19,7 +19,7 @@ def _format_bms(bms:Bms) -> dict :
     return {
         "id": bms.id,
         "type": bms.type,
-        "file_path": Path(bms.file_path),
+        "file_path": str(Path(bms.file_path)),
         "PLAYER": bms.PLAYER,
         "TITLE": bms.TITLE,
         "ARTIST": bms.ARTIST,
@@ -39,7 +39,7 @@ def _format_song(song:Song) -> dict :
     return {
         "id": song.id,
         "name": song.name,
-        "file_path": Path(song.file_path),
+        "dir_path": str(Path(song.dir_path)),
     }
 
 
@@ -112,7 +112,7 @@ def search_folder_list(filter_name=None, page=1, page_size=50):
     return result
 
 
-def add_bms(file_path:Path, bms_info:dict) -> Bms :
+def add_bms(file_path:Path, bms_info:dict, on_error_raise_exc=True) -> Bms :
     bms = Bms(
         type=1,
         file_path=file_path.as_posix(),
@@ -134,26 +134,48 @@ def add_bms(file_path:Path, bms_info:dict) -> Bms :
             Bms.file_path == file_path.as_posix()
         ).first()
         if query_result:
-            raise DuplicateKeyError(query_result.id)
+            if on_error_raise_exc:
+                raise DuplicateKeyError(query_result.id)
+            return query_result
 
         session.add(bms)
     return bms
 
 
-def add_song(name:str, dir_path:Path) -> Song :
+def add_song(name:str, dir_path:Path, on_error_raise_exc=True) -> Song :
     song = Song(
         name=name,
-        file_path=dir_path.as_posix(),
+        dir_path=dir_path.as_posix(),
     )
     with session_scope() as session:
         query_result = session.query(Song).filter(
             Song.name == name
         ).first()
         if query_result:
-            raise DuplicateKeyError(query_result.id)
+            if on_error_raise_exc:
+                raise DuplicateKeyError(query_result.id)
+            return query_result
 
         session.add(song)
     return song
+
+
+def add_song_bms_relation(song_obj:Song, bms_obj:Bms):
+    with session_scope() as session:
+        song_obj = session.merge(song_obj)
+        bms_obj = session.merge(bms_obj)
+        if song_obj and bms_obj:
+            if bms_obj not in song_obj.bmses:
+                song_obj.bmses.append(bms_obj)
+
+
+def add_folder_song_relation(folder_obj:Folder, song_obj:Song):
+    with session_scope() as session:
+        folder_obj = session.merge(folder_obj)
+        song_obj = session.merge(song_obj)
+        if folder_obj and song_obj:
+            if song_obj not in folder_obj.songs:
+                folder_obj.songs.append(song_obj)
 
 
 def add_folder(name:str, desc:str, info:str) -> Folder :

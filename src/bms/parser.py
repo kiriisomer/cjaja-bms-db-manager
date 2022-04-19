@@ -3,14 +3,10 @@ from pathlib import Path
 from .exc import ParseBmsError
 
 
-def scan_bms_file(scan_path:Path):
-    """scan the bms file and return the bms info"""
-    bms_file_info = []
+def scan_bms_file_iter(scan_path:Path):
     for file_path in scan_path.rglob("*.*"):
         if is_bms_file(file_path):
-            bms_file_info.append(get_bms_info(file_path))
-
-    return bms_file_info
+            yield get_bms_info(file_path)
 
 
 def is_bms_file(file_path:Path):
@@ -18,7 +14,7 @@ def is_bms_file(file_path:Path):
     return all((
         file_path.is_file(),
         file_path.suffix in (".bms", ".bme"),
-        file_path.name not in '.-~', 
+        file_path.name not in '.-~',
     ))
 
 
@@ -55,7 +51,7 @@ def get_bms_info(file_path:Path):
                     decoded_tmp_str = _try_decode(tmp_str)
                     if not decoded_tmp_str:
                         raise ParseBmsError(f"parse error at line {line_no+1}: unknown char coding")
-                    
+
                     info [key.decode()] = decoded_tmp_str
                     break
 
